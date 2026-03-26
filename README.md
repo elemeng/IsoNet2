@@ -1,5 +1,7 @@
-# *IsoNet2* 
+# *IsoNet2*
+
 ## Contents
+
 + [Overview](#0-overview)
 + [Installation and System Requirements](#1-installation-and-system-requirements)
 + [Tutorial](#2-tutorial)
@@ -12,54 +14,85 @@
 
 *IsoNet2* contains six modules: ***prepare_star***, ***deconv***, ***make_mask***, ***denoise***, ***refine***, and ***predict***. All commands in IsoNet operate on `.star` text files which record paths of data and relevant parameters. For detailed descriptions of each module please refer to the individual tasks. Users can choose to utilize IsoNet through either GUI or command-lines.
 
-We maintain an IsoNet Google group for discussions or news. To subscribe or visit the group via the web interface please visit [https://groups.google.com/u/1/g/isonet](https://groups.google.com/u/1/g/isonet). To post to the forum you can either use the web interface or email to isonet@googlegroups.com
+We maintain an IsoNet Google group for discussions or news. To subscribe or visit the group via the web interface please visit [https://groups.google.com/u/1/g/isonet](https://groups.google.com/u/1/g/isonet). To post to the forum you can either use the web interface or email to <isonet@googlegroups.com>
 
 # 1. Installation and System Requirements
+
 ## Prerequisites
+
 ### Computing Resources
+
 IsoNet2 is optimized for high-performance GPU computing.
+
 + Supported Hardware: NVIDIA GPUs (Ampere architecture or newer recommended).
 + Memory: 24 GB VRAM recommended.
   + *Low-memory environments: Users with limited VRAM must adjust configuration parameters (specifically cube and batch sizes) to ensure stability.*
 
 ### Performance Optimization (New in v2.0.2)
+
 *IsoNet2* now includes several performance optimizations for faster training and better resource utilization:
 
 **Memory Optimizations:**
+
 + **Gradient Checkpointing** (`--use_checkpoint`): Reduces VRAM usage by 30-50% at the cost of ~20% compute. Enables larger effective batch sizes on limited GPU memory.
 + **GPU Mask Caching**: CTF and missing wedge masks are now cached on GPU, eliminating CPU→GPU transfers per batch.
 + **Gradient Accumulation** (`--acc_batches N`): Simulate larger batches by accumulating gradients over N steps. Effective batch size = batch_size × acc_batches.
 
 **I/O Optimizations:**
+
 + **Fast I/O Mode** (`--fast_io`): Pre-extracts subvolumes to memory-mapped cache for 10-50x faster data loading. Recommended for HDD or network storage.
 + **Storage-Aware Access**: Automatically detects SSD/NVMe/HDD and optimizes read patterns (sequential for HDD, parallel for SSD).
 + **Async Prefetching**: Overlaps CPU data loading with GPU computation using double buffering.
 
 **Compute Optimizations:**
-+ **torch.compile()**: Enabled by default for PyTorch 2.0+, providing 10-30% speedup through kernel fusion.
+
++ **torch.compile()**: Optional for PyTorch 2.0+, providing 10-30% speedup through kernel fusion. Disabled by default due to compatibility issues with gradient checkpointing.
+
 + **Parallel Extraction**: Multi-process subvolume extraction with SIMD normalization.
 
+
+
+**Important Notes:**
+
++ `--compile_model` and `--use_checkpoint` cannot be used together (torch.compile() conflicts with gradient checkpointing)
+
++ When using `--use_checkpoint`, torch.compile() is automatically disabled
+
+
+
 **Recommended Settings by Hardware:**
+
 ```bash
-# Limited VRAM (12-16 GB)
+
+# Limited VRAM (12-16 GB) - use checkpointing, not compile
+
 isonet.py refine ... --batch_size 2 --acc_batches 4 --use_checkpoint
 
+
+
 # HDD storage
+
 isonet.py refine ... --fast_io --cache_dir /fast_ssd/isonet_cache
 
-# Maximum performance (HPC with 64GB+ CPU RAM)
+
+
+# Maximum performance (HPC with 64GB+ CPU RAM, no checkpointing needed)
+
 isonet.py refine ... --fast_io --compile_model --ncpus 16
+
 ```
 
 ### Software Environment
- + Operating System: Linux (64-bit).
- + Validation: Validated on Rocky Linux 8.6; compatible with most standard Linux distributions.
+
++ Operating System: Linux (64-bit).
++ Validation: Validated on Rocky Linux 8.6; compatible with most standard Linux distributions.
 
 ### Python Dependencies
 
 All dependencies can be found in the `isonet2_environment.yml` file.
 
 ## Installing [Conda](https://docs.conda.io/projects/conda/en/latest/user-guide/getting-started.html)
+
 + Download your `conda-installer`:
 
   + [Miniconda](https://www.anaconda.com/docs/getting-started/miniconda/main) installer for Linux (use this if you're new).
@@ -79,6 +112,7 @@ All dependencies can be found in the `isonet2_environment.yml` file.
 + After successful installation, running the command conda list should display a list of installed packages.
 
 ## Installing [CUDA](https://docs.nvidia.com/cuda/cuda-installation-guide-linux/index.html)
+
 + Find information on your GPU for [Linux](https://itsfoss.com/check-graphics-card-linux/).
 
 + Look up your GPU to make sure it is supported. If its [CUDA GPU Compute Capability](https://developer.nvidia.com/cuda-gpus) is below ***3.5***, you will not be able to run IsoNet2.
@@ -89,6 +123,7 @@ All dependencies can be found in the `isonet2_environment.yml` file.
 + Select the [CUDA Toolkit](https://developer.nvidia.com/cuda-toolkit-archive) version that matches what you read in *Table 3* and follow the install instructions.
 
 After successfully installing, you can check your CUDA version using `nvidia-smi`, which should produce something similar to below:
+
 ```
 +---------------------------------------------------------------------------------------+
 | NVIDIA-SMI 535.129.03             Driver Version: 535.129.03   CUDA Version: 12.2     |
@@ -126,17 +161,21 @@ After successfully installing, you can check your CUDA version using `nvidia-smi
 +---------------------------------------------------------------------------------------+
 
 ```
+
 ## Installing IsoNet2
 
 ### GUI Installation
-Download the *IsoNet2* release from the release tab on the right column of our [Github](https://github.com/IsoNet-cryoET/IsoNet2) repository. This release contains the source code and the binary file for the GUI. Extract the compressed files into your desired installation folder. 
+
+Download the *IsoNet2* release from the release tab on the right column of our [Github](https://github.com/IsoNet-cryoET/IsoNet2) repository. This release contains the source code and the binary file for the GUI. Extract the compressed files into your desired installation folder.
 
 ### non-GUI Installation
-Alternatively, if you only plan to use our command-line interface (CLI), you can clone this repository by running `git clone https://github.com/IsoNet-cryoET/IsoNet2.git` in your desired installation folder. This will not contain the compiled GUI file. 
+
+Alternatively, if you only plan to use our command-line interface (CLI), you can clone this repository by running `git clone https://github.com/IsoNet-cryoET/IsoNet2.git` in your desired installation folder. This will not contain the compiled GUI file.
 
 Once you have installed IsoNet2, navigate to your installation folder and run `cd IsoNet2` and `bash install.sh`. This uses the included `isonet2_environment.yml` file to create a new Conda environment and runs `source <your_installation_directory>/IsoNet2/isonet2.bashrc` to tell your shell the location of `isonet.py`. You may want to append this command to your `.bashrc` file so you don't have to re-source it every time you wish to use IsoNet.
 
 Installation should take 5-10 minutes. Upon successful installation, activate your environment by running `conda activate isonet2_environment`. Running the command `isonet.py --help` should display the following help message.
+
 ```
 INFO: Showing help with the command 'isonet.py -- --help'.
 
@@ -145,6 +184,7 @@ NAME
 
 ...
 ```
+
 # 2. Tutorial
 
 The following tutorial outlines the basic *IsoNet2* workflow on 5 immature HIV-1 dMACANC VLP even/odd paired tomograms using the [GUI](#21-gui) and [CLI](#22-command-line-interface).
@@ -166,6 +206,7 @@ In a new working directory, download and extract the `tomograms_split` folder fr
 The *IsoNet2* GUI provides intuitive, detailed, and organized process management. The interface provides tools for dataset organization, parameter configuration, job submission, and real-time process monitoring. Entry points for the main processing steps are kept in a left-hand menu, while the central panel shows the program’s live output during a run, allowing users to view refinement in real time and make adjustments as needed.
 
 ### 2.1.0 Launch GUI
+
 Launch the GUI by typing `IsoNet2` in your terminal. If you encounter issues with your machine and the SUID sandbox, run `IsoNet2 -no-sandbox` instead.
 
 ![](./IsoNet/tutorial_figures/GUI/00OpenSettings.png "Open Settings")
@@ -181,18 +222,20 @@ Select your **even** dataset in the popup directory. Do the same for your **odd*
 
 ![](./IsoNet/tutorial_figures/GUI/03ModifyPrepare.png)
 Set your **pixel size in Å** to 5.4 and leave the other parameters at their default values. Then select **Run**.
- 
-You may optionally enable **create_average** to average the half tomograms and reduce noise for the ***Deconvolve*** and ***Create Mask*** modules (more information in Section [**2.1.2: Pre-Mask Processing**](#212-pre-mask-processing)). 
+
+You may optionally enable **create_average** to average the half tomograms and reduce noise for the ***Deconvolve*** and ***Create Mask*** modules (more information in Section [**2.1.2: Pre-Mask Processing**](#212-pre-mask-processing)).
 For each module, **Show command** provides the `isonet.py` command if you prefer to run it directly in your terminal.
 
 ![](./IsoNet/tutorial_figures/GUI/04ModifyDefocus.png)
 The starfile should automatically display.  Fill in the **rlnDefocus** column with the approximate defocus in Å at 0° tilt for each tomogram.
 > *If you ran the command in your terminal, or if you have a pre-existing RELION5 starfile, select **Load from Star** and choose the starfile from your working directory.*
+>
 ### 2.1.2 Pre-Mask Processing
 
 *The following options apply CTF correction to improve the signal-to-noise ratio before generating a mask for refinement.*
 
 ### 2.1.2a Denoise
+
 If you have access to even/odd paired tomograms, as we do in this tutorial, we recommend using the ***Denoise*** module. This provides comparable results to running a full ***Refine*** job and using the corrected tomograms to generate the mask, as done in the *IsoNet2* paper.
 
 ![](./IsoNet/tutorial_figures/GUI/06ModifyDenoise.png)
@@ -201,11 +244,12 @@ Open the ***Denoise*** tab. Define the appropriate **gpuID**s and select **CTF_m
 > ***with preview** enables us to view live predictions from the network.*
 
 ![](./IsoNet/tutorial_figures/GUI/08DenoisePreview.png)
-The page should automatically load your progress as the network begins training. The log output `log.txt` and a graph of the loss `loss_full.png` will be saved to `./denoise/<jobID>/`, along with all model files. With **with preview** enabled, the network also saves and displays a prediction for the selected tomograms (via **preview tomo index**) after every **saving interval** (default 10 epochs). 
+The page should automatically load your progress as the network begins training. The log output `log.txt` and a graph of the loss `loss_full.png` will be saved to `./denoise/<jobID>/`, along with all model files. With **with preview** enabled, the network also saves and displays a prediction for the selected tomograms (via **preview tomo index**) after every **saving interval** (default 10 epochs).
 
 > *Clicking on the eye icon next to our preview will open the denoised tomogram file in IMOD.*
 
 ### 2.1.2b Predict
+
 Before training finishes, we can already queue a **Predict** job. Open the ***Predict*** tab.
 
 ![](./IsoNet/tutorial_figures/GUI/09OpenPredict.png)
@@ -227,6 +271,7 @@ Once our previous job finishes, we can open the ***Predict*** tab again and view
 Wait for prediction to finish. Once done, you can view your corrected tomograms at the provided paths.
 
 ### 2.1.2c Deconvolve
+
 If you are unable to use the network-based CTF correction in the ***Denoise*** module, you can instead use the ***Deconvolve*** module, inherited from *IsoNet1*, to improve mask quality. While this is relatively quick, it may produce lower quality masks than using ***Denoise***.
 
 ![](./IsoNet/tutorial_figures/GUI/21OpenDeconv.png)
@@ -236,6 +281,7 @@ Open the ***Deconvolve*** tab and set **snrfalloff** to 0.7. Click **Submit (In 
 The page should automatically load your progress as the network begins training. The log output `log.txt` will be saved to `./deconv/<jobID>/`, along with all deconvolved tomograms.
 
 ### 2.1.3 Create Mask
+
 This step creates masks based on standard deviation and mean density to exclude empty/unwanted areas of each tomogram. During extraction, each subtomogram for training is centered on a valid region of the mask to ensure that it captures a region of interest.
 
 ![](./IsoNet/tutorial_figures/GUI/14zOpenMask.png)
@@ -243,9 +289,11 @@ Open the ***Create Mask*** tab and set **std_percentage** to 80.
 
 ![](./IsoNet/tutorial_figures/GUI/15ModifyMask.png)
 Select your **Input Column**:
+
 1) **rlnDenoisedTomoName** if you used the ***Denoise*** module.
 2) **rlnDeconvTomoName** if you used the ***Deconvolve*** module.
 3) **rlnCorrectedTomoName** if you are refining a previously refined dataset.
+
 > *Using the other unprocessed input columns (i.e. rlnTomoName, rlnTomoReconstructedTomogramHalf1) will likely generate poor masks, and is not recommended.*
 
 **Submit** your job.
@@ -264,10 +312,9 @@ Open the ***Refine*** tab. Keep **Even/Odd Input** enabled. Set **subtomo size**
 
 ![](./IsoNet/tutorial_figures/GUI/18ModifyRefine.png)
  Scroll down, select **CTF_mode** network from the dropdown menu, and set **bfactor** to 200 (**bfactor** should be lower for celluar tomograms. It can be **zero** or even negative). Click **Submit (In Queue)**.
- 
 
 ![](./IsoNet/tutorial_figures/GUI/20RefinePreview.png)
-The page should automatically load your progress as the network begins training. The log output, `log.txt`, a graph of the loss, `loss_full.png`, and all model files will be saved to `./refine/<jobID>/`. With **with preview** enabled, the network also saves and displays a prediction for the selected tomograms (via **preview tomo index**) after every **saving interval** (default 10 epochs). 
+The page should automatically load your progress as the network begins training. The log output, `log.txt`, a graph of the loss, `loss_full.png`, and all model files will be saved to `./refine/<jobID>/`. With **with preview** enabled, the network also saves and displays a prediction for the selected tomograms (via **preview tomo index**) after every **saving interval** (default 10 epochs).
 
 Refer to the Predict instructions under Section [**2.1.2b Predict**](#212b-predict) to queue a predict job once your refinement finishes. Once prediction is done, view your CTF-corrected, denoised, and missing-wedge-corrected tomograms!
 
@@ -279,6 +326,7 @@ Refer to the Predict instructions under Section [**2.1.2b Predict**](#212b-predi
 Once you are familiar with the *IsoNet2* workflow, you may prefer the CLI for more hands-on data management and parameter tuning. This tutorial has the same result as pasting the output from **Show command** for each GUI module into the terminal.
 
 ### 2.2.1 prepare_star
+
 Run the following command to prepare the starfile. You may enter a single `defocus` value (to be used for every tomogram) or a comma-separated list of values (to be applied to their respective tomograms). You may also leave it as *None* and use your default text editor or the GUI to open `tomograms.star` and manually enter the defocus values. We will optionally set `--create_average` to True to show the *IsoNet2* workflow without even/odd paired tomograms.
 
 ```
@@ -318,41 +366,50 @@ _rlnCorrectedTomoName #16
 ```
 
 ### 2.2.2a denoise
-If you have access to even/odd paired tomograms, as we do in this tutorial, we recommend using `denoise` before generating masks. This increases SNR, providing comparable results to running `refine` and using the corrected tomograms to generate the mask as done in the *IsoNet2* paper. `--CTF_mode network` multiplies the network input with the CTF, analogous to applying the missing wedge mask during training. 
+
+If you have access to even/odd paired tomograms, as we do in this tutorial, we recommend using `denoise` before generating masks. This increases SNR, providing comparable results to running `refine` and using the corrected tomograms to generate the mask as done in the *IsoNet2* paper. `--CTF_mode network` multiplies the network input with the CTF, analogous to applying the missing wedge mask during training.
 
 ```
 isonet.py denoise tomograms.star --CTF_mode network --gpuID <ids>
 ```
 
 ### 2.2.2b predict
+
 After training, apply the trained model to all of the original tomograms to denoise and correct for CTF.
+
 ```
 isonet.py predict tomograms.star denoise/network_n2n_unet-medium_96_full.pt --gpuID <ids>
 ```
 
 ### 2.2.2c deconv
+
 If you are unable to use the network-based CTF correction in ***denoise***, you may instead use ***deconv*** to improve mask quality. This functionality is inherited from *IsoNet1*. While it is quicker, it may produce lower quality masks than using ***denoise***. `--snrfalloff` reduces high-frequency contribution stabilizing deconvolution on noisy data. `--deconvstrength` multiplies correction and low-frequency recovery.
+
 ```
 isonet.py deconv tomograms.star --snrfalloff 0.7 --deconvstrength 1
 ```
 
 ### 2.2.3 make_mask
-Create quality masks using **density_percentage** to identify populated regions and **std_percentage** to filter out noise. During extraction, each subtomogram for training is centered on a valid region of the mask to ensure that it captures a region of interest. 
+
+Create quality masks using **density_percentage** to identify populated regions and **std_percentage** to filter out noise. During extraction, each subtomogram for training is centered on a valid region of the mask to ensure that it captures a region of interest.
 
 ```
 isonet.py make_mask tomograms.star --density_percentage 50 --std_percentage 80 --input_column <column>
 ```
 
 For `--input_column`, use:
+
 1) `rlnDenoisedTomoName` if you used ***denoise***.
 2) `rlnDeconvTomoName` if you used ***deconv***.
 3) `rlnCorrectedTomoName` if you are refining a previously refined dataset.
+
 > *Using the other unprocessed input columns will likely generate poor masks, and is not recommended.*
 
 ![](./IsoNet/tutorial_figures/masks.png)
 **Fig. 3.** XY slices and corresponding masks of HIV tomograms that have been 1) reconstructed with weighted back projection, 2) CTF-deconvolved, 3) CTF-corrected and denoised
 
 ### 2.2.4 refine
+
 Train the network to predict missing-wedge-corrected, CTF-corrected, and denoised tomograms. `--cube_size` is the length of each subtomogram in voxels. `--mw_weight` determines how heavily missing-wedge correction is prioritized over denoising: here the ratio is 200 to 1. Enabling `--CTF_mode` network multiplies the network input with the CTF, analogous to missing wedge mask application. `--bfactor` boosts high frequency information for CTF correction. (**bfactor** should be lower for celluar tomograms. It can be **zero** or even negative)
 
 ```
@@ -364,6 +421,7 @@ isonet.py refine tomograms.star --method isonet2-n2n --cube_size 128 --epochs 70
 **For slow storage (HDD/network)**, add `--fast_io --cache_dir /fast_ssd/cache` to pre-extract subvolumes for 10-50x faster I/O.
 
 ### 2.2.5 predict
+
 After training, apply the trained model to all of the original tomograms to obtain CTF-corrected, denoised, and missing-wedge-corrected tomograms.
 
 ```
@@ -378,9 +436,11 @@ Once prediction is done, view your CTF-corrected, denoised, and missing-wedge-co
 # 3. *IsoNet2* Modules
 
 ## prepare_star
+
 Generate a tomograms.star file in the same style as the RELION5 tomographic processing pipeline that lists tomogram file paths and acquisition metadata used by all downstream IsoNet commands.
 
 ### Key parameters
+
 + `full` — Directory with full tomogram files; use for single-map training (isonet2). Default: `"None"`.
 
 + `even` — Directory with even-half tomograms; use with odd for noise2noise (isonet2-n2n). Default: `"None"`.
@@ -399,12 +459,15 @@ Generate a tomograms.star file in the same style as the RELION5 tomographic proc
 + `voltage` — Acceleration voltage in kV. Default: **300**.
 
 ### Practical notes
+>
 > *This function accepts either a single set of full tomograms or paired even/odd half tomograms for noise2noise workflows. By default, **pixel size in Å** and **number of subtomograms per tomogram** are determined automatically from your tomograms' metadata. **tilt min/max** (default ±60) are used to define the shape of the missing wedge mask used during training. The other parameters are related to your physical electron microscope and are used later for CTF correction. Always inspect and edit the generated STAR if you need tomogram-specific subtomogram counts or have pregenerated mask/defocus entries.*
 
 ## denoise
+
 Entry point for *IsoNet2* training. Use denoise for quicker noise-to-noise (n2n) training workflows for preliminary tomogram testing and mask generation.
 
 ### Key parameters
+
 + `star_file` — STAR file for tomograms. Required parameter.
 
 + `arch` — Network architecture string (e.g., unet-small, unet-medium, unet-large). Determines model capacity and VRAM requirements. Default: `"unet-medium"`.
@@ -443,13 +506,15 @@ Entry point for *IsoNet2* training. Use denoise for quicker noise-to-noise (n2n)
 Fig. 5. Effects of clip_first_peak_mode and bfactor on CTF.
 
 ### Practical notes
+>
 > *Choose arch, cube_size, and batch_size to fit your GPU memory; larger architectures and cubes improve fidelity but increase resource needs. Enable mixed_precision to save VRAM and speed up training if your GPU and drivers support it.*
 
-
 ## deconv
+
 CTF deconvolution preprocessing that enhances low-resolution contrast and recovers information attenuated by the microscope contrast transfer function. Recommended for non–phase-plate data; skip for phase-plate data or if intending to use network-based CTF deconvolution.
 
 ### Key parameters
+
 + `star_file` — Input STAR listing tomograms and acquisition metadata. Required parameter.
 
 + `chunk_size` — If set, tomograms are processed in smaller cubic chunks to reduce memory usage. Useful for very large tomograms or limited RAM/VRAM. May create edge artifacts if chunks are too small. Default: `None`.
@@ -464,12 +529,15 @@ CTF deconvolution preprocessing that enhances low-resolution contrast and recove
 + `tomo_idx` — If set, process only the tomograms listed by these indices (e.g., "1,2,4" or "5-10,15,16"). Default: `None`.
 
 ### Practical notes
+>
 > *Inspect deconvolved outputs visually for ringing or other artifacts after changing snrfalloff or deconvstrength. Use chunking plus a moderate overlap_rate (0.25–0.5) when memory is limited.*
 
 ## make_mask
+
 Generate masks to prioritize regions of interest. Masks improve sampling efficiency and training stability.
 
 ### Key parameters
+
 + `star_file` — Input STAR listing tomograms and acquisition metadata. Required parameter.
 
 + `density_percentage` — Percentage of voxels retained based on local density ranking; lower values create stricter masks (keep fewer voxels). Default: **50**.
@@ -481,13 +549,15 @@ Generate masks to prioritize regions of interest. Masks improve sampling efficie
 + `z_crop` — Fraction of tomogram Z to crop from both ends; masks out top and bottom 10% each when set to 0.2. Use to avoid sampling low-quality reconstruction edges. Default: **0.2**.
 
 ### Practical notes
+>
 > *Defaults are suitable for most datasets; tune density/std percentages for very sparse specimens or dense, crowded volumes. If automatic masks miss specimen regions, edit boundaries in the STAR or provide manual masks.*
 
-
 ## refine
+
 Use refine for *IsoNet2* missing-wedge correction (isonet2) or isonet2-n2n combined modes.
 
 ### Key parameters
+
 + `star_file` — Input STAR listing tomograms and acquisition metadata. Required parameter.
 
 + `apply_mw_x1` — Whether to apply missing wedge to subtomograms at the beginning. Default: `True`.
@@ -530,8 +600,9 @@ Use refine for *IsoNet2* missing-wedge correction (isonet2) or isonet2-n2n combi
 + `with_preview` — If True, run prediction every save interval. Default: `True`.
 
 **Performance Optimization Parameters:**
+
 + `acc_batches` — Gradient accumulation steps. Effective batch size = batch_size × acc_batches. Useful for training with large effective batch sizes on limited VRAM. Default: **1**.
-+ `compile_model` — If True, uses torch.compile() for optimized model execution (PyTorch 2.0+). Recommended for 10-30% speedup. Default: `True`.
++ `compile_model` — If True, uses torch.compile() for optimized model execution (PyTorch 2.0+). Provides 10-30% speedup but conflicts with gradient checkpointing. Default: `False`.
 + `use_checkpoint` — If True, uses gradient checkpointing to trade compute for memory (30-50% VRAM reduction, ~20% slower). Default: `False`.
 + `fast_io` — If True, uses memory-mapped cache and parallel extraction for 10-50x faster I/O. Requires sufficient CPU RAM and disk space. Default: `False`.
 + `cache_dir` — Directory for memory-mapped cache when using fast_io. If None, uses .isonet_cache in star file directory. Default: `None`.
@@ -541,6 +612,7 @@ Use refine for *IsoNet2* missing-wedge correction (isonet2) or isonet2-n2n combi
 Fig. 5. Effects of clip_first_peak_mode and bfactor on CTF.
 
 ### Practical notes
+>
 > *Choose arch, cube_size, and batch_size to fit your GPU memory; larger architectures and cubes improve fidelity but increase resource needs. Enable mixed_precision to save VRAM and speed up training if your GPU and drivers support it.*
 
 > **Performance Tips:** For limited VRAM, use `--use_checkpoint` with `--acc_batches 4` to simulate batch_size 16 with batch_size 4. For slow I/O on HDD/network storage, use `--fast_io --cache_dir /fast_ssd/cache` to pre-extract subvolumes to SSD.
@@ -550,6 +622,7 @@ Fig. 5. Effects of clip_first_peak_mode and bfactor on CTF.
 Apply a trained IsoNet model to tomograms to produce denoised or missing-wedge–corrected volumes. Prediction utilizes the model's saved cube size and CTF handling options, but allows for runtime adjustments.
 
 ### Key parameters
+
 + `star_file` — Input STAR describing tomograms to predict. Required parameter.
 
 + `model` — Path to trained model checkpoint (.pt) for single-model prediction. Required parameter.
@@ -563,16 +636,23 @@ Apply a trained IsoNet model to tomograms to produce denoised or missing-wedge�
 + `tomo_idx` — Process a subset of STAR entries by index. Default: `None`.
 
 ### Practical notes
+>
 > *Match prediction cube/crop sizes and padding to the network's training settings (these come from the model object). When using CTF-aware models, ensure isCTFflipped and STAR defocus/CTF fields are correct.*
 
 # 4. FAQs
+
 ## Q: When should I use even/odd paired versus full tomograms?
+
 Use even/odd paired tomograms when you want to use `--method isonet2-n2n`, which is generally recommended as it provides better denoising. Use full tomograms for single-map training (`--method isonet2`) when movies and tilt-series are not available.
+
 ## Q: How many subtomograms should I extract per tomogram/epochs should I train for?
+
 The default is 3000 subtomograms in total per epoch. Changing this default is not usually necessary unless you would like to increase the number of subtomograms for a particularly dense tomogram. Reducing this number is not recommended.
 
 Increasing the number of subtomograms is analogous to increasing the number of training epochs, as subtomograms are extracted during training (as opposed to before, in IsoNet1). Because *IsoNet2* does not currently use a specialized learning rate scheduler, it is acceptable to keep the default and simply halt training when the loss has converged. We also do not recommend training for fewer than 50 epochs.
+
 ## Q: How can I reduce memory usage during training?
+
 + Enable mixed_precision for float16 training (enabled by default)
 + Use `--use_checkpoint` for 30-50% VRAM reduction (trades ~20% compute)
 + Use `--acc_batches N` to simulate larger batches with less memory
@@ -580,48 +660,68 @@ Increasing the number of subtomograms is analogous to increasing the number of t
 + Choose a smaller network architecture (unet-small vs unet-medium)
 + Reduce cube_size (must be multiple of 16, minimum 64)
 + Use chunk_size with overlap_rate for processing large tomograms
+
 ## Q: When should I use the CTF deconvolution module?
+
 Use the ***deconv*** module in two scenarios:
 
 1. If you have full tomograms instead of even/odd tomograms for missing wedge correction, similar to IsoNet1.
 2. If you have even/odd tomograms and want to quickly generate a mask for refinement. Enable `create_average` in ***prepare_star*** to create averaged tomograms, then use ***deconv*** to generate deconvolved tomograms as a base for mask generation.
+
 ## Q: When should I create masks?
+
 Masks prioritize regions of interest (specimen areas) during training, which improves sampling efficiency and training stability by focusing the network on relevant areas rather than empty space. We recommend always creating a mask for refinement. They are not necessary for ***denoise***.
+
 ## Q: My masks are missing specimen regions. What can I do?
+
 You can regenerate the mask using less strict (higher values) `density_percentage` and `std_percentage` parameters, manually edit `rlnMaskBoundary` in the .star file, or provide your own manual masks through the `mask_folder` parameter.
-## Q: Which CTF_mode should I use (Network or Wiener) during refine? 
+
+## Q: Which CTF_mode should I use (Network or Wiener) during refine?
+
 `CTF_mode network` with `clip_first_peak_mode 1` generally provides higher resolution detail. Modes 2, 3, and 0 may yield higher contrast in the low-resolution regime for specific datasets—try them out for your specific needs. `CTF_mode wiener` also works well; we recommend `snrfalloff` between 0 and 1, and `deconvstrength` between 1 and 5. However, Wiener mode requires more hyperparameter tuning than network-based CTF correction. Both approaches should outperform the ***deconv*** module.
 
 ## Q: What value should I use for mw_weight?
+
 We recommend using higher weights for missing wedge correction (20–200) to prioritize missing wedge reconstruction over general denoising. Keeping `mw_weight` at the default value of 0 disables masked loss, meaning a single loss is used to describe both missing wedge correction and denoising.
 
 ## Q: How can I train with large batch sizes on limited GPU memory?
+
 Use gradient accumulation and checkpointing:
+
 ```bash
 # Simulate batch_size 16 with batch_size 4
 isonet.py refine ... --batch_size 4 --acc_batches 4 --use_checkpoint
 ```
+
 This provides the gradient stability of large batches while fitting in limited VRAM. Gradient checkpointing trades ~20% compute for 30-50% memory savings.
 
 ## Q: Training is slow due to I/O bottlenecks. How can I speed it up?
+
 For HDD or network storage, use Fast I/O mode to pre-extract subvolumes to a memory-mapped cache:
+
 ```bash
 # Pre-extract to SSD cache (one-time cost)
 isonet.py refine ... --fast_io --cache_dir /fast_ssd/isonet_cache
 # Subsequent epochs read from SSD at 10-50x speed
 ```
+
 The cache persists between runs and is automatically validated against source files.
 
 ## Q: Should I use torch.compile()?
+
 Yes, torch.compile() is enabled by default for PyTorch 2.0+ and provides 10-30% speedup through kernel fusion. Disable it only if you encounter compatibility issues:
+
 ```bash
 isonet.py refine ... --compile_model False
 ```
 
 ## Q: How do I know if my storage is detected correctly?
+
 The system automatically detects SSD/NVMe/HDD/Network storage and logs the type on startup:
+
 ```
 INFO: Source data storage type: HDD
 WARNING: HDD detected - coordinates will be sorted for sequential access
 ```
+
 For HDDs, coordinates are automatically sorted for sequential reads. For best performance with HDDs, use `--fast_io` with an SSD cache directory.

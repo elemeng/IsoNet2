@@ -610,7 +610,7 @@ class ISONET:
                    highpassnyquist:float=0.02,
 
                    acc_batches: int=1,
-                   compile_model: bool=True,
+                   compile_model: bool=False,
                    use_checkpoint: bool=False,
 
                    fast_io: bool=False,
