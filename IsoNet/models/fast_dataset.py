@@ -281,6 +281,13 @@ class FastTrainSets_n2n(Train_sets_n2n):
         self.star = starfile.read(self._init_params['tomo_star'])
         self.cube_size = self._init_params['cube_size']
         self.method = self._init_params['method']
+        
+        # Set required attributes for parent methods
+        self.bfactor = self._init_params['bfactor']
+        self.clip_first_peak_mode = self._init_params['clip_first_peak_mode']
+        self.snrfalloff = self._init_params['snrfalloff']
+        self.deconvstrength = self._init_params['deconvstrength']
+        self.highpassnyquist = self._init_params['highpassnyquist']
 
         # Load mask lists for GPU caching
         self.mw_list = []
