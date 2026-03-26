@@ -4,6 +4,7 @@ Optimized for HPC environments with abundant CPU RAM (64-512GB).
 """
 import os
 import json
+import logging
 import numpy as np
 import torch
 from torch.utils.data import Dataset
@@ -17,6 +18,9 @@ import time
 
 from IsoNet.models.data_sequence import Train_sets_n2n
 from IsoNet.utils.fileio import read_mrc
+from IsoNet.utils.storage import (
+    get_storage_type, StorageType, detect_and_log_storage_type
+)
 
 
 class AsyncPrefetcher:
@@ -233,10 +237,30 @@ class FastTrainSets_n2n(Train_sets_n2n):
             'bfactor': bfactor
         }
 
+        # Detect source storage type and provide recommendations
+        import starfile
+        star = starfile.read(tomo_star)
+        sample_path = None
+        if method in ['isonet2-n2n', 'n2n'] and 'rlnTomoReconstructedTomogramHalf1' in star.columns:
+            sample_path = star.iloc[0]['rlnTomoReconstructedTomogramHalf1']
+        elif 'rlnTomoName' in star.columns:
+            sample_path = star.iloc[0]['rlnTomoName']
+
+        if sample_path and os.path.exists(sample_path):
+            source_storage = detect_and_log_storage_type(sample_path, "Source data")
+
+            # Recommend cache placement based on source storage
+            if source_storage == StorageType.HDD and cache_dir is None:
+                logging.warning("Source data is on HDD. Consider setting --cache_dir to an SSD path for better performance.")
+                logging.warning("Example: --cache_dir /fast_ssd/isonet_cache")
+
         # Setup cache
         if cache_dir is None:
             cache_dir = os.path.join(os.path.dirname(tomo_star), '.isonet_cache')
         self.cache = MemoryMappedCache(cache_dir, max_size_gb=max_cache_gb)
+
+        # Log cache location storage type
+        detect_and_log_storage_type(cache_dir, "Cache")
 
         self.num_workers = num_workers or min(cpu_count(), 16)
         self.prefetcher = None

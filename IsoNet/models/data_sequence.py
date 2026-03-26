@@ -1,6 +1,7 @@
 import numpy as np
 import torch
 import os
+import logging
 from torch.utils.data.dataset import Dataset
 from IsoNet.utils.fileio import read_mrc
 import starfile
@@ -8,6 +9,10 @@ import mrcfile
 from tqdm import tqdm
 import random
 from IsoNet.utils.missing_wedge import mw3D
+from IsoNet.utils.storage import (
+    get_storage_type, get_io_strategy, OptimizedMRCReader,
+    sort_coords_for_sequential_access, StorageType
+)
 
 def normalize_percentage(volume, percentile=4, lower_bound = None, upper_bound=None):
     # original_shape = tensor.shape
@@ -137,10 +142,35 @@ class Train_sets_n2n(Dataset):
         """Initialize paths, mean, std, and coordinates from the starfile."""
         column_name_list = self.star.columns.tolist()
 
+        # Detect storage type from first tomogram for I/O optimization
+        self.storage_types = []
+        self.io_strategies = []
+
         # Initialize tqdm progress bar
-        for _, row in tqdm(self.star.iterrows(), total=len(self.star), desc="Preprocess tomograms", ncols=100):
+        for idx, row in tqdm(self.star.iterrows(), total=len(self.star), desc="Preprocess tomograms", ncols=100):
             if 'rlnGroundTruth' in row and row['rlnGroundTruth'] not in [None, "None"]:
                 self.has_groundtruth = True
+
+            # Detect storage type
+            if self.method in ['isonet2-n2n','n2n']:
+                sample_path = row.get('rlnTomoReconstructedTomogramHalf1', row.get('rlnTomoName'))
+            else:
+                sample_path = row.get(self.input_column, row.get('rlnTomoName'))
+
+            if sample_path and os.path.exists(sample_path):
+                storage_type = get_storage_type(sample_path)
+                self.storage_types.append(storage_type)
+                self.io_strategies.append(get_io_strategy(storage_type))
+
+                # Log storage type for first tomogram
+                if idx == 0:
+                    logging.info(f"Tomogram {idx} storage type: {storage_type.value.upper()}")
+                    if storage_type == StorageType.HDD:
+                        logging.warning("HDD detected - coordinates will be sorted for sequential access")
+            else:
+                self.storage_types.append(StorageType.UNKNOWN)
+                self.io_strategies.append(get_io_strategy(StorageType.UNKNOWN))
+
             mask = self._load_statistics_and_mask(row, column_name_list)
             if 'rlnBoxFile' not in row or row['rlnBoxFile'] in [None, "None"]:
                 n_samples = row['rlnNumberSubtomo']
@@ -151,6 +181,11 @@ class Train_sets_n2n(Dataset):
             else:
                 coords = np.loadtxt(row['rlnBoxFile'], dtype=int)[:, [2, 1, 0]]
                 self.n_samples_per_tomo.append(len(coords))
+
+            # Sort coordinates for sequential access on HDDs
+            if idx < len(self.storage_types) and self.storage_types[idx] == StorageType.HDD:
+                coords = sort_coords_for_sequential_access(coords, mask.shape)
+
             self.coords.append(coords)
 
             min_angle, max_angle, tilt_step = row['rlnTiltMin'], row['rlnTiltMax'], 3
@@ -268,17 +303,14 @@ class Train_sets_n2n(Dataset):
         return x, y
 
     def load_and_normalize(self, tomo_paths, tomo_index, z, y, x, eo_idx, invert=True):
-        """Load and normalize a subvolume from a tomogram."""
+        """Load and normalize a subvolume from a tomogram with storage-aware optimization."""
         half_size = self.cube_size // 2
-        with mrcfile.mmap(tomo_paths[tomo_index], mode='r', permissive=True) as tomo:
-            subvolume = tomo.data[z-half_size:z+half_size, y-half_size:y+half_size, x-half_size:x+half_size]
-        
-        # if invert:
-        #     #return 1 - (subvolume - self.lowerbounds[tomo_index][eo_idx]) / (self.upperbounds[tomo_index][eo_idx]- self.lowerbounds[tomo_index][eo_idx])
-        #     return (self.upperbounds[tomo_index][eo_idx] - subvolume) / (self.upperbounds[tomo_index][eo_idx]- self.lowerbounds[tomo_index][eo_idx])
 
-        # else:
-        #     return (subvolume - self.lowerbounds[tomo_index][eo_idx]) / (self.upperbounds[tomo_index][eo_idx]- self.lowerbounds[tomo_index][eo_idx])
+        # Use storage-aware reader
+        storage_type = self.storage_types[tomo_index] if tomo_index < len(self.storage_types) else None
+        with OptimizedMRCReader(tomo_paths[tomo_index], storage_type) as reader:
+            subvolume = reader.data[z-half_size:z+half_size, y-half_size:y+half_size, x-half_size:x+half_size]
+
         if invert:
             return (self.mean[tomo_index][eo_idx] - subvolume) / self.std[tomo_index][eo_idx]
         else:
