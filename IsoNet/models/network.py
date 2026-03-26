@@ -149,7 +149,7 @@ class Net:
         model_scripted = torch.jit.script(self.model) # Export to TorchScript
         model_scripted.save(path) # Save
 
-    def prepare_train_dataset(self, training_params):    
+    def prepare_train_dataset(self, training_params):
         if training_params['CTF_mode'] != 'network':
             clip_first_peak_mode = 0
         else:
@@ -165,11 +165,31 @@ class Net:
             else:
                 noise_dir = None
 
-            from IsoNet.models.data_sequence import Train_sets_n2n, MRCDataset
-            self.train_dataset = Train_sets_n2n(training_params['star_file'],method=training_params['method'], 
-                                        cube_size=training_params['cube_size'], input_column=training_params['input_column'],\
-                                        split=training_params['split'], noise_dir=noise_dir, clip_first_peak_mode=clip_first_peak_mode,\
-                                        start_bt_size=training_params["start_bt_size"], bfactor=training_params["bfactor"])
+            # Use fast dataset if enabled
+            if training_params.get('fast_io', False):
+                from IsoNet.models.fast_dataset import FastTrainSets_n2n
+                cache_dir = training_params.get('cache_dir', None)
+                max_cache_gb = training_params.get('max_cache_gb', 200.0)
+                self.train_dataset = FastTrainSets_n2n(
+                    training_params['star_file'],
+                    method=training_params['method'],
+                    cube_size=training_params['cube_size'],
+                    input_column=training_params['input_column'],
+                    split=training_params['split'],
+                    noise_dir=noise_dir,
+                    clip_first_peak_mode=clip_first_peak_mode,
+                    start_bt_size=training_params["start_bt_size"],
+                    bfactor=training_params["bfactor"],
+                    cache_dir=cache_dir,
+                    max_cache_gb=max_cache_gb,
+                    num_workers=training_params.get('ncpus', 16)
+                )
+            else:
+                from IsoNet.models.data_sequence import Train_sets_n2n, MRCDataset
+                self.train_dataset = Train_sets_n2n(training_params['star_file'],method=training_params['method'],
+                                            cube_size=training_params['cube_size'], input_column=training_params['input_column'],\
+                                            split=training_params['split'], noise_dir=noise_dir, clip_first_peak_mode=clip_first_peak_mode,\
+                                            start_bt_size=training_params["start_bt_size"], bfactor=training_params["bfactor"])
 
 
     def train(self, training_params):

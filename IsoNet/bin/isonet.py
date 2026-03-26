@@ -611,7 +611,11 @@ class ISONET:
 
                    acc_batches: int=1,
                    compile_model: bool=True,
-                   use_checkpoint: bool=False
+                   use_checkpoint: bool=False,
+
+                   fast_io: bool=False,
+                   cache_dir: str=None,
+                   max_cache_gb: float=200.0
                    ):
         """
         Use refine for IsoNet2 missing-wedge correction (isonet2) or isonet2-n2n combined modes.
@@ -651,6 +655,9 @@ class ISONET:
             acc_batches: Gradient accumulation steps. Effective batch size = batch_size * acc_batches. Useful for training with large effective batch sizes on limited VRAM.
             compile_model: If True, uses torch.compile() for optimized model execution (PyTorch 2.0+). Recommended for 10-30% speedup.
             use_checkpoint: If True, uses gradient checkpointing to trade compute for memory (30-50% VRAM reduction, ~20% slower).
+            fast_io: If True, uses memory-mapped cache and parallel extraction for 10-50x faster I/O. Requires sufficient CPU RAM and disk space.
+            cache_dir: Directory for memory-mapped cache. If None, uses .isonet_cache in star file directory.
+            max_cache_gb: Maximum cache size in GB. Default 200GB. Actual usage depends on dataset size.
         """
         correct_between_tilts: bool=False
         start_bt_size: int=128
@@ -738,7 +745,10 @@ class ISONET:
             "random_rot_weight":random_rot_weight,
             'do_phaseflip_input':do_phaseflip_input,
             "clip_first_peak_mode":clip_first_peak_mode,
-            "bfactor": bfactor
+            "bfactor": bfactor,
+            'fast_io': fast_io,
+            'cache_dir': cache_dir,
+            'max_cache_gb': max_cache_gb
         }
 
         training_params['split'] = "full"
