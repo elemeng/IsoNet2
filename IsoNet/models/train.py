@@ -366,7 +366,7 @@ def ddp_train(rank, world_size, port_number, model, train_dataset, training_para
                         scaler.update()
                     else:
                         optimizer.step()
-                optimizer.zero_grad() 
+                    optimizer.zero_grad()  # Only clear after step for gradient accumulation 
 
                 if rank == 0 and ( (i_batch+1)%training_params['acc_batches'] == 0 ):        
                     loss_str = (f"Loss: {loss.item():6.5f}, Learning rate: {scheduler.get_last_lr()[0]:.4e}")
