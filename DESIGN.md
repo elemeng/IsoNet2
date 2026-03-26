@@ -33,6 +33,191 @@ The Python implementation includes several optimizations that should be replicat
 - Consider `burn` checkpointing support for gradient checkpointing
 - Implement async data loading with `tokio` or similar
 
+---
+
+## Training Equivalence & Convergence Guarantees
+
+To ensure the Rust implementation produces **bit-exact or near-exact training behavior** as the official Python implementation, the following must be strictly maintained:
+
+### 1. Numerical Precision Requirements
+
+**Float Precision:**
+- Default: `f32` (float32) throughout - matches PyTorch default
+- Mixed precision training optional but must follow same casting rules
+- CTF/Mask computations in `f64` then cast to `f32` for storage (matches Python)
+
+**Critical Numerical Operations:**
+```rust
+// FFT operations must match numpy.fft exactly
+// Use rustfft with same normalization mode ('ortho' or 'backward')
+pub const FFT_NORM: FftNormalization = FftNormalization::Ortho;  // Matches PyTorch
+
+// Random number generation must match PyTorch/NumPy
+// Use same RNG algorithm: PCG64 or MT19937 with identical seeding
+pub type RngType = Pcg64Mcg;  // Matches NumPy's default
+```
+
+### 2. Network Architecture Equivalence
+
+**Weight Initialization:**
+- Use identical initialization schemes as PyTorch defaults
+- Conv3d: Kaiming uniform (fan_in, a=√5)
+- BatchNorm: γ=1, β=0
+- Document all init parameters for verification
+
+**Forward Pass:**
+- Conv3d: Same padding, stride, dilation
+- BatchNorm3d: Same ε (1e-5), momentum (0.1)
+- LeakyReLU: Same negative_slope (0.01)
+- Residual connections: `output + input` (not fused)
+
+**Backward Pass:**
+- Gradient checkpointing: Identical recompute strategy
+- Gradient accumulation: Same accumulation order and normalization
+
+### 3. Loss Function Equivalence
+
+**L2 Loss (MSE):**
+```rust
+// Must match: nn.MSELoss(reduction='mean')
+// PyTorch computes mean over ALL elements
+loss = ((pred - target).powi(2)).mean()
+```
+
+**Huber Loss:**
+```rust
+// Must match: nn.HuberLoss(delta=1.0, reduction='mean')
+// Same delta threshold, same behavior at boundary
+```
+
+**Masked Loss (for missing wedge):**
+```rust
+// Split loss into inside/outside missing wedge
+// Same weighting: inside_loss + mw_weight * outside_loss
+// Same normalization by mask volume
+```
+
+### 4. Optimizer Equivalence
+
+**AdamW:**
+```rust
+// Must match: torch.optim.AdamW(
+//   lr=3e-4, betas=(0.9, 0.999), eps=1e-8,
+//   weight_decay=0.01, amsgrad=False
+// )
+// Same parameter groups, same weight decay application
+```
+
+**Learning Rate Scheduler:**
+```rust
+// Must match: CosineAnnealingLR(T_max=10, eta_min=3e-4)
+// Same cosine curve, same step timing
+```
+
+### 5. Data Pipeline Equivalence
+
+**Normalization:**
+```rust
+// Percentile normalization (4% lower, 96% upper)
+// Same quantile calculation method
+lower = tensor.quantile(0.04)
+upper = tensor.quantile(0.96)
+normalized = (tensor - lower) / (upper - lower)
+```
+
+**Data Augmentation:**
+- Random rotations: Same rotation axes, same probability (0.2)
+- Phase flipping: Same sign application
+- Noise addition: Same distribution, same amplitude scaling
+
+**Subvolume Extraction:**
+- Same coordinate sampling (within mask bounds)
+- Same cube_size constraints (multiple of 16)
+- Same padding/masking at boundaries
+
+### 6. CTF & Missing Wedge Equivalence
+
+**CTF Computation:**
+```rust
+// Exact same formula as Python
+// λ = 12.2643247 / sqrt(voltage * (1 + voltage * 0.978466e-6))
+// χ = π/2 * (λ³ * Cs * k⁴ + 2λ * Δf * k²)
+// CTF = amplitude * cos(χ) - sqrt(1-amplitude²) * sin(χ)
+// Same frequency grid generation (0 to Nyquist)
+```
+
+**Missing Wedge Mask:**
+- Same spherical mask generation
+- Same tilt angle interpolation
+- Same wedge softening at edges
+
+### 7. Training Loop Semantics
+
+**Batch Processing:**
+```rust
+// Same order of operations:
+1. Load batch (x1, x2, masks)
+2. Apply CTF/masks to input
+3. Forward pass
+4. Compute loss (normalized by acc_batches)
+5. Backward pass
+6. If (batch_idx + 1) % acc_batches == 0:
+     optimizer.step()
+     optimizer.zero_grad()
+```
+
+**Gradient Accumulation:**
+- Accumulate gradients: `grad += new_grad / acc_batches`
+- Step only every `acc_batches` batches
+- Same gradient scaling for mixed precision
+
+### 8. Verification Strategy
+
+**Unit Tests:**
+```rust
+// Compare forward pass output
+let python_output = load_npy("test_data/unet_forward.npy");
+let rust_output = model.forward(&input);
+assert_allclose(rust_output, python_output, rtol=1e-5, atol=1e-6);
+
+// Compare gradients
+let python_grads = load_npy("test_data/unet_grads.npy");
+let rust_grads = compute_grads(&model, &input, &target);
+assert_allclose(rust_grads, python_grads, rtol=1e-4, atol=1e-5);
+```
+
+**Integration Tests:**
+- Train 5 epochs on small dataset
+- Compare loss curves (should be < 1% relative difference)
+- Compare final model weights (cosine similarity > 0.999)
+
+**Regression Tests:**
+- Save intermediate activations from Python
+- Compare layer-by-layer outputs in Rust
+- Identify and fix divergence points
+
+### 9. Known Sources of Divergence
+
+**Acceptable (minor):**
+- Different FFT libraries (rustfft vs cuFFT): < 1e-6 relative error
+- Different BLAS libraries: < 1e-5 relative error
+- Floating point reordering: < 1e-6 relative error
+
+**Must Fix:**
+- Different random seeds (must use same seed)
+- Different initialization (must match exactly)
+- Different loss computation (must match reduction)
+- Different optimizer step timing
+
+**Test Command:**
+```bash
+# Compare Python vs Rust training
+cargo test --test convergence -- --nocapture
+# Should pass: loss curves match within tolerance
+```
+
+---
+
 **Tech Stack:**
 
 - `burn` - Deep learning framework (training & inference)
