@@ -348,7 +348,7 @@ def ddp_train(rank, world_size, port_number, model, train_dataset, training_para
                             else:
                                 loss = (loss1 + loss2)/2.
 
-                    if len(gt.shape) > 2:
+                    if gt is not None and len(gt.shape) > 2:
                         gt_inside_loss = cross_correlate(apply_F_filter_torch(gt, mw), apply_F_filter_torch(preds_x1, mw))
                         gt_outside_loss = cross_correlate(apply_F_filter_torch(gt, 1-mw), apply_F_filter_torch(preds_x1, 1-mw))
                         inside_loss = gt_inside_loss
