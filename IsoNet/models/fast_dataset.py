@@ -289,25 +289,41 @@ class FastTrainSets_n2n(Train_sets_n2n):
         self.deconvstrength = self._init_params['deconvstrength']
         self.highpassnyquist = self._init_params['highpassnyquist']
 
-        # Load mask lists for GPU caching
-        self.mw_list = []
-        self.wiener_list = []
-        self.CTF_list = []
+        # Try to load cached masks
+        mw_cache_path = os.path.join(self.cache.cache_dir, 'mw_list.npy')
+        ctf_cache_path = os.path.join(self.cache.cache_dir, 'ctf_list.npy')
+        wiener_cache_path = os.path.join(self.cache.cache_dir, 'wiener_list.npy')
+        
+        if os.path.exists(mw_cache_path) and os.path.exists(ctf_cache_path):
+            # Load cached masks
+            self.mw_list = [np.load(mw_cache_path)[i] for i in range(len(self.star))]
+            self.CTF_list = [np.load(ctf_cache_path)[i] for i in range(len(self.star))]
+            self.wiener_list = [np.load(wiener_cache_path)[i] for i in range(len(self.star))]
+        else:
+            # Compute and cache masks
+            self.mw_list = []
+            self.wiener_list = []
+            self.CTF_list = []
+            
+            for _, row in self.star.iterrows():
+                min_angle, max_angle = row['rlnTiltMin'], row['rlnTiltMax']
+                tilt_step = None
+                if self._init_params['correct_between_tilts']:
+                    tilt_step = 3
 
-        for _, row in self.star.iterrows():
-            min_angle, max_angle = row['rlnTiltMin'], row['rlnTiltMax']
-            tilt_step = None
-            if self._init_params['correct_between_tilts']:
-                tilt_step = 3
+                self.mw_list.append(self._compute_missing_wedge(
+                    self.cube_size, min_angle, max_angle, tilt_step,
+                    self._init_params['start_bt_size'] / tilt_step if tilt_step else 100000
+                ))
 
-            self.mw_list.append(self._compute_missing_wedge(
-                self.cube_size, min_angle, max_angle, tilt_step,
-                self._init_params['start_bt_size'] / tilt_step if tilt_step else 100000
-            ))
-
-            CTF_vol, wiener_vol = self._compute_CTF_vol(row)
-            self.wiener_list.append(wiener_vol)
-            self.CTF_list.append(CTF_vol)
+                CTF_vol, wiener_vol = self._compute_CTF_vol(row)
+                self.wiener_list.append(wiener_vol)
+                self.CTF_list.append(CTF_vol)
+            
+            # Save cached masks
+            np.save(mw_cache_path, np.array(self.mw_list))
+            np.save(ctf_cache_path, np.array(self.CTF_list))
+            np.save(wiener_cache_path, np.array(self.wiener_list))
 
     def _build_cache(self):
         """Build cache with parallel extraction."""
@@ -368,6 +384,14 @@ class FastTrainSets_n2n(Train_sets_n2n):
 
         self.length = len(self.cache)
         print(f"Cache built: {self.length} samples")
+        
+        # Cache masks for future runs (parent __init__ already computed them)
+        mw_cache_path = os.path.join(self.cache.cache_dir, 'mw_list.npy')
+        ctf_cache_path = os.path.join(self.cache.cache_dir, 'ctf_list.npy')
+        wiener_cache_path = os.path.join(self.cache.cache_dir, 'wiener_list.npy')
+        np.save(mw_cache_path, np.array(self.mw_list))
+        np.save(ctf_cache_path, np.array(self.CTF_list))
+        np.save(wiener_cache_path, np.array(self.wiener_list))
 
     def __getitem__(self, idx):
         """Fast retrieval from memory-mapped cache."""
