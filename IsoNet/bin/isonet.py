@@ -607,7 +607,11 @@ class ISONET:
 
                    snrfalloff: float=0,
                    deconvstrength: float=1,
-                   highpassnyquist:float=0.02
+                   highpassnyquist:float=0.02,
+
+                   acc_batches: int=1,
+                   compile_model: bool=True,
+                   use_checkpoint: bool=False
                    ):
         """
         Use refine for IsoNet2 missing-wedge correction (isonet2) or isonet2-n2n combined modes.
@@ -641,13 +645,13 @@ class ISONET:
             random_rot_weight: Percentage of rotations applied as random augmentation. 2.
             with_preview: If True, run prediction using the final checkpoint(s) after training. 
             prev_tomo_idx: If set, automatically predict only the tomograms listed by these indices (e.g., "1,2,4" or "5-10,15,16"). 
-            snrfalloff: Controls frequency-dependent SNR attenuation applied during deconvolution; larger values reduce high-frequency contribution more aggressively and can stabilize deconvolution on noisy data; smaller values preserve more high-frequency content but risk amplifying noise. 
+            snrfalloff: Controls frequency-dependent SNR attenuation applied during deconvolution; larger values reduce high-frequency contribution more aggressively and can stabilize deconvolution on noisy data; smaller values preserve more high-frequency content but risk amplifying noise.
             deconvstrength: Scalar multiplier for deconvolution strength; increasing this emphasizes correction and low-frequency recovery but can introduce ringing/artifacts if set too high. 0.
             highpassnyquist: Fraction of the Nyquist used as a very-low-frequency high-pass cutoff; use to remove large-scale intensity gradients and drift; usually left at default. 02.
+            acc_batches: Gradient accumulation steps. Effective batch size = batch_size * acc_batches. Useful for training with large effective batch sizes on limited VRAM.
+            compile_model: If True, uses torch.compile() for optimized model execution (PyTorch 2.0+). Recommended for 10-30% speedup.
+            use_checkpoint: If True, uses gradient checkpointing to trade compute for memory (30-50% VRAM reduction, ~20% slower).
         """
-        compile_model=False
-        # there is some questions about this parameter, relate to the placement of the zerograd
-        acc_batches=1
         correct_between_tilts: bool=False
         start_bt_size: int=128
         with_deconv: bool=False
@@ -739,7 +743,7 @@ class ISONET:
 
         training_params['split'] = "full"
         from IsoNet.models.network import Net
-        network = Net(method=method, arch=arch, cube_size=cube_size, pretrained_model=pretrained_model,state='train')
+        network = Net(method=method, arch=arch, cube_size=cube_size, pretrained_model=pretrained_model, state='train', use_checkpoint=use_checkpoint)
         network.prepare_train_dataset(training_params)
         if with_preview:
             new_epochs = save_interval

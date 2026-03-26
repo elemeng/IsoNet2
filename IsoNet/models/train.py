@@ -70,14 +70,42 @@ def rotate_vol(volume, rotation):
     new_vol = torch.rot90(new_vol, rotation[1][1], [rotation[1][0][0]-3,rotation[1][0][1]-3])
     return new_vol
 
-def apply_F_filter_torch(input_map,F_map):
-    fft_input = torch.fft.fftshift(torch.fft.fftn(input_map, dim=(-1, -2, -3)),dim=(-1, -2, -3))
-    # mw_shift = torch.fft.fftshift(F_map, dim=(-1, -2, -3))
-    out = torch.fft.ifftn(torch.fft.fftshift(fft_input*F_map, dim=(-1, -2, -3)),dim=(-1, -2, -3))
-    out =  torch.real(out)
-    return out
-def process_batch(batch):
-    if len(batch) == 7:
+def apply_F_filter_torch(input_map, F_map):
+    """Apply Fourier domain filter. Maintains exact behavior for training consistency."""
+    fft_input = torch.fft.fftshift(torch.fft.fftn(input_map, dim=(-1, -2, -3)), dim=(-1, -2, -3))
+    out = torch.fft.ifftn(torch.fft.fftshift(fft_input * F_map, dim=(-1, -2, -3)), dim=(-1, -2, -3))
+    return torch.real(out)
+
+def cache_masks_on_gpu(train_dataset, device):
+    """Cache CTF, Wiener, and MW masks on GPU to avoid CPU->GPU transfers."""
+    mw_cache = []
+    ctf_cache = []
+    wiener_cache = []
+    for i in range(len(train_dataset.mw_list)):
+        mw_cache.append(torch.from_numpy(train_dataset.mw_list[i]).unsqueeze(0).to(device, non_blocking=True))
+        ctf_cache.append(torch.from_numpy(train_dataset.CTF_list[i]).unsqueeze(0).to(device, non_blocking=True))
+        wiener_cache.append(torch.from_numpy(train_dataset.wiener_list[i]).unsqueeze(0).to(device, non_blocking=True))
+    return mw_cache, ctf_cache, wiener_cache
+
+def process_batch(batch, mw_cache=None, ctf_cache=None, wiener_cache=None):
+    """Process batch with optional GPU-cached masks using tomo_index lookup."""
+    if len(batch) == 5:  # New format: x1, x2, gt, tomo_index, noise_vol
+        x1 = batch[0].cuda()
+        x2 = batch[1].cuda()
+        gt = batch[2].cuda() if batch[2].numel() > 1 else None
+        tomo_indices = batch[3]  # Keep on CPU for indexing
+        noise_vol = batch[4].cuda() if batch[4].numel() > 1 else None
+
+        if mw_cache is not None:
+            # Gather masks for each sample in batch
+            mw = torch.stack([mw_cache[idx] for idx in tomo_indices])
+            ctf = torch.stack([ctf_cache[idx] for idx in tomo_indices])
+            wiener = torch.stack([wiener_cache[idx] for idx in tomo_indices])
+        else:
+            mw, ctf, wiener = None, None, None
+
+        return x1, x2, gt, mw, ctf, wiener, noise_vol
+    elif len(batch) == 7:  # Old format for backward compatibility
         return [b.cuda() for b in batch]
     return batch[0].cuda(), batch[1].cuda(), None, None, None, None, None
 
@@ -85,7 +113,7 @@ def ddp_train(rank, world_size, port_number, model, train_dataset, training_para
     os.environ["MASTER_ADDR"] = "localhost"
     os.environ["MASTER_PORT"] = port_number
     batch_size_gpu = training_params['batch_size'] // (training_params['acc_batches'] * world_size)
-       
+
     n_workers = max(training_params["ncpus"] // world_size, 1)
 
     if world_size > 1:
@@ -95,15 +123,23 @@ def ddp_train(rank, world_size, port_number, model, train_dataset, training_para
         model = model.to(rank)
         model = DDP(model, device_ids=[rank])
         train_sampler = DistributedSampler(train_dataset, shuffle=True, drop_last=True)
+        # Add prefetch_factor for better I/O overlap
+        prefetch_factor = 2 if n_workers > 0 else None
         train_loader = torch.utils.data.DataLoader(
             train_dataset, batch_size=batch_size_gpu, persistent_workers=True,
-            num_workers=n_workers, pin_memory=True, sampler=train_sampler)
+            num_workers=n_workers, pin_memory=True, sampler=train_sampler,
+            prefetch_factor=prefetch_factor)
     else:
         model = model.to(rank)
         train_sampler = None
+        prefetch_factor = 2 if n_workers > 0 else None
         train_loader = torch.utils.data.DataLoader(
             train_dataset, batch_size=batch_size_gpu, persistent_workers=True,
-            num_workers=n_workers, pin_memory=True, sampler=train_sampler, shuffle=True)
+            num_workers=n_workers, pin_memory=True, sampler=train_sampler, shuffle=True,
+            prefetch_factor=prefetch_factor)
+
+    # Cache masks on GPU to avoid CPU->GPU transfers during training
+    mw_cache, ctf_cache, wiener_cache = cache_masks_on_gpu(train_dataset, rank)
 
     if training_params['compile_model'] == True:
         if torch.__version__ >= "2.0.0":
@@ -117,7 +153,7 @@ def ddp_train(rank, world_size, port_number, model, train_dataset, training_para
 
     loss_funcs = {"L2": nn.MSELoss(), "Huber": nn.HuberLoss(), "L1": nn.L1Loss()}
     loss_func = loss_funcs.get(training_params['loss_func'])
-    
+
     if training_params['mixed_precision']:
         scaler = GradScaler()
 
@@ -128,15 +164,15 @@ def ddp_train(rank, world_size, port_number, model, train_dataset, training_para
         if train_sampler:
             train_sampler.set_epoch(epoch)
         model.train()
-        optimizer.zero_grad() 
+        optimizer.zero_grad()
         with tqdm(total=total_steps, unit=" batch", disable=(rank!=0),desc=f"Epoch {epoch+1}") as progress_bar:
             # have to convert to tensor because reduce needed it
             average_loss = torch.tensor(0, dtype=torch.float).to(rank)
             average_inside_loss = torch.tensor(0, dtype=torch.float).to(rank)
             average_outside_loss = torch.tensor(0, dtype=torch.float).to(rank)
 
-            for i_batch, batch in enumerate(train_loader):  
-                x1, x2, gt, mw, ctf, wiener, noise_vol = process_batch(batch)
+            for i_batch, batch in enumerate(train_loader):
+                x1, x2, gt, mw, ctf, wiener, noise_vol = process_batch(batch, mw_cache, ctf_cache, wiener_cache)
 
                 if training_params['CTF_mode'] in  ["phase_only", 'wiener','network']:
                     if training_params["phaseflipped"]:

@@ -20,8 +20,9 @@ def get_num_parameters(model):
     return sum(p.numel() for p in model.parameters())
 
 class Net:
-    def __init__(self, method=None, arch = 'unet-default', cube_size = 96, pretrained_model=None, state="train"):
+    def __init__(self, method=None, arch = 'unet-default', cube_size = 96, pretrained_model=None, state="train", use_checkpoint=False):
         self.state = state
+        self.use_checkpoint = use_checkpoint
         if pretrained_model != None and pretrained_model != "None":
             self.load(pretrained_model)
         else:
@@ -38,13 +39,13 @@ class Net:
         self.cube_size = cube_size
         if self.arch == 'unet-large':
             from .unet import Unet
-            self.model = Unet(filter_base = 64,unet_depth=4, add_last=True)
+            self.model = Unet(filter_base = 64,unet_depth=4, add_last=True, use_checkpoint=self.use_checkpoint)
         elif self.arch == 'unet-medium':
             from .unet import Unet
-            self.model = Unet(filter_base = 32,unet_depth=4, add_last=True)
+            self.model = Unet(filter_base = 32,unet_depth=4, add_last=True, use_checkpoint=self.use_checkpoint)
         elif self.arch == 'unet-small':
             from .unet import Unet
-            self.model = Unet(filter_base = 16,unet_depth=4, add_last=True)
+            self.model = Unet(filter_base = 16,unet_depth=4, add_last=True, use_checkpoint=self.use_checkpoint)
 
         elif self.arch in ['scunet-large','scunet-medium','scunet-small','scunet-fast','scunet-fast-large']:
             if self.state == "train":

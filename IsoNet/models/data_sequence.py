@@ -289,7 +289,6 @@ class Train_sets_n2n(Dataset):
 
     def __getitem__(self, idx):
         """Return a sample of data at a given index."""
-        #tomo_index, coord_index = divmod(idx, self.n_samples_per_tomo)
         tomo_index = np.searchsorted(self.cumulative_samples, idx, side='right')
         coord_index = idx - (self.cumulative_samples[tomo_index - 1] if tomo_index > 0 else 0)
 
@@ -298,7 +297,7 @@ class Train_sets_n2n(Dataset):
         odd_subvolume = self.load_and_normalize(self.tomo_paths_odd, tomo_index, z, y, x, eo_idx=1)
 
         x1_volume, x2_volume = self.random_swap(
-            np.array(even_subvolume, dtype=np.float32)[np.newaxis, ...], 
+            np.array(even_subvolume, dtype=np.float32)[np.newaxis, ...],
             np.array(odd_subvolume, dtype=np.float32)[np.newaxis, ...]
         )
 
@@ -316,8 +315,8 @@ class Train_sets_n2n(Dataset):
             gt_subvolume = self.load_and_normalize(self.tomo_paths_gt, tomo_index, z, y, x, eo_idx=1)[np.newaxis, ...]
         else:
             gt_subvolume = np.array([0], dtype=np.float32)
-        return x1_volume, x2_volume, gt_subvolume, self.mw_list[tomo_index][np.newaxis, ...], \
-            self.CTF_list[tomo_index][np.newaxis, ...], self.wiener_list[tomo_index][np.newaxis, ...], noise_volume[np.newaxis, ...]        
+        # Return tomo_index for mask lookup instead of full mask tensors
+        return x1_volume, x2_volume, gt_subvolume, tomo_index, noise_volume[np.newaxis, ...]        
 
 if __name__ == '__main__':
     from IsoNet.utils.missing_wedge import mw3D
