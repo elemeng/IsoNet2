@@ -268,8 +268,10 @@ class FastTrainSets_n2n(Train_sets_n2n):
         # Build or load cache
         if self.cache.exists(tomo_star, cube_size, method):
             print(f"Loading cached dataset from {cache_dir}")
+            print("  -> Mapping memory-mapped arrays...", flush=True)
             self.cache.load()
             self.length = len(self.cache)
+            print(f"  -> Loaded {self.length} subvolumes", flush=True)
             self._load_parent_metadata()
         else:
             print(f"Building cache in {cache_dir}...")
@@ -278,7 +280,13 @@ class FastTrainSets_n2n(Train_sets_n2n):
     def _load_parent_metadata(self):
         """Load metadata from parent class without loading data."""
         import starfile
+        from tqdm import tqdm
+        
+        print("  -> Reading STAR file...", flush=True)
         self.star = starfile.read(self._init_params['tomo_star'])
+        n_tomos = len(self.star)
+        print(f"     Found {n_tomos} tomograms", flush=True)
+        
         self.cube_size = self._init_params['cube_size']
         self.method = self._init_params['method']
         
@@ -295,17 +303,22 @@ class FastTrainSets_n2n(Train_sets_n2n):
         wiener_cache_path = os.path.join(self.cache.cache_dir, 'wiener_list.npy')
         
         if os.path.exists(mw_cache_path) and os.path.exists(ctf_cache_path):
-            # Load cached masks
-            self.mw_list = [np.load(mw_cache_path)[i] for i in range(len(self.star))]
-            self.CTF_list = [np.load(ctf_cache_path)[i] for i in range(len(self.star))]
-            self.wiener_list = [np.load(wiener_cache_path)[i] for i in range(len(self.star))]
+            print("  -> Loading cached masks (CTF, MW, Wiener)...", flush=True)
+            mw_data = np.load(mw_cache_path)
+            ctf_data = np.load(ctf_cache_path)
+            wiener_data = np.load(wiener_cache_path)
+            
+            self.mw_list = [mw_data[i] for i in range(n_tomos)]
+            self.CTF_list = [ctf_data[i] for i in range(n_tomos)]
+            self.wiener_list = [wiener_data[i] for i in range(n_tomos)]
+            print(f"     Loaded masks for {n_tomos} tomograms", flush=True)
         else:
-            # Compute and cache masks
+            print(f"  -> Computing masks for {n_tomos} tomograms (this may take a minute)...", flush=True)
             self.mw_list = []
             self.wiener_list = []
             self.CTF_list = []
             
-            for _, row in self.star.iterrows():
+            for idx, row in tqdm(self.star.iterrows(), total=n_tomos, desc="     Computing", ncols=70):
                 min_angle, max_angle = row['rlnTiltMin'], row['rlnTiltMax']
                 tilt_step = None
                 if self._init_params['correct_between_tilts']:
@@ -321,9 +334,11 @@ class FastTrainSets_n2n(Train_sets_n2n):
                 self.CTF_list.append(CTF_vol)
             
             # Save cached masks
+            print("  -> Saving mask cache for future runs...", flush=True)
             np.save(mw_cache_path, np.array(self.mw_list))
             np.save(ctf_cache_path, np.array(self.CTF_list))
             np.save(wiener_cache_path, np.array(self.wiener_list))
+            print("     Mask cache saved", flush=True)
 
     def _build_cache(self):
         """Build cache with parallel extraction."""
