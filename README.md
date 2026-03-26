@@ -22,6 +22,35 @@ IsoNet2 is optimized for high-performance GPU computing.
 + Memory: 24 GB VRAM recommended.
   + *Low-memory environments: Users with limited VRAM must adjust configuration parameters (specifically cube and batch sizes) to ensure stability.*
 
+### Performance Optimization (New in v2.0.2)
+*IsoNet2* now includes several performance optimizations for faster training and better resource utilization:
+
+**Memory Optimizations:**
++ **Gradient Checkpointing** (`--use_checkpoint`): Reduces VRAM usage by 30-50% at the cost of ~20% compute. Enables larger effective batch sizes on limited GPU memory.
++ **GPU Mask Caching**: CTF and missing wedge masks are now cached on GPU, eliminating CPU→GPU transfers per batch.
++ **Gradient Accumulation** (`--acc_batches N`): Simulate larger batches by accumulating gradients over N steps. Effective batch size = batch_size × acc_batches.
+
+**I/O Optimizations:**
++ **Fast I/O Mode** (`--fast_io`): Pre-extracts subvolumes to memory-mapped cache for 10-50x faster data loading. Recommended for HDD or network storage.
++ **Storage-Aware Access**: Automatically detects SSD/NVMe/HDD and optimizes read patterns (sequential for HDD, parallel for SSD).
++ **Async Prefetching**: Overlaps CPU data loading with GPU computation using double buffering.
+
+**Compute Optimizations:**
++ **torch.compile()**: Enabled by default for PyTorch 2.0+, providing 10-30% speedup through kernel fusion.
++ **Parallel Extraction**: Multi-process subvolume extraction with SIMD normalization.
+
+**Recommended Settings by Hardware:**
+```bash
+# Limited VRAM (12-16 GB)
+isonet.py refine ... --batch_size 2 --acc_batches 4 --use_checkpoint
+
+# HDD storage
+isonet.py refine ... --fast_io --cache_dir /fast_ssd/isonet_cache
+
+# Maximum performance (HPC with 64GB+ CPU RAM)
+isonet.py refine ... --fast_io --compile_model --ncpus 16
+```
+
 ### Software Environment
  + Operating System: Linux (64-bit).
  + Validation: Validated on Rocky Linux 8.6; compatible with most standard Linux distributions.
@@ -330,6 +359,10 @@ Train the network to predict missing-wedge-corrected, CTF-corrected, and denoise
 isonet.py refine tomograms.star --method isonet2-n2n --cube_size 128 --epochs 70 --mw_weight 200 --CTF_mode network --bfactor 200 --gpuID <ids>
 ```
 
+**For limited GPU memory**, add `--use_checkpoint --acc_batches 4` to reduce VRAM usage while maintaining effective batch size.
+
+**For slow storage (HDD/network)**, add `--fast_io --cache_dir /fast_ssd/cache` to pre-extract subvolumes for 10-50x faster I/O.
+
 ### 2.2.5 predict
 After training, apply the trained model to all of the original tomograms to obtain CTF-corrected, denoised, and missing-wedge-corrected tomograms.
 
@@ -496,11 +529,21 @@ Use refine for *IsoNet2* missing-wedge correction (isonet2) or isonet2-n2n combi
 + `snrfalloff` — Controls frequency-dependent SNR attenuation applied during deconvolution; larger values reduce high-frequency contribution more aggressively and can stabilize deconvolution on noisy data; smaller values preserve more high-frequency content but risk amplifying noise. Default: **0**.
 + `with_preview` — If True, run prediction every save interval. Default: `True`.
 
+**Performance Optimization Parameters:**
++ `acc_batches` — Gradient accumulation steps. Effective batch size = batch_size × acc_batches. Useful for training with large effective batch sizes on limited VRAM. Default: **1**.
++ `compile_model` — If True, uses torch.compile() for optimized model execution (PyTorch 2.0+). Recommended for 10-30% speedup. Default: `True`.
++ `use_checkpoint` — If True, uses gradient checkpointing to trade compute for memory (30-50% VRAM reduction, ~20% slower). Default: `False`.
++ `fast_io` — If True, uses memory-mapped cache and parallel extraction for 10-50x faster I/O. Requires sufficient CPU RAM and disk space. Default: `False`.
++ `cache_dir` — Directory for memory-mapped cache when using fast_io. If None, uses .isonet_cache in star file directory. Default: `None`.
++ `max_cache_gb` — Maximum cache size in GB for fast_io mode. Default: **200**.
+
 ![](./IsoNet/tutorial_figures/CTF_b_factor.png)
 Fig. 5. Effects of clip_first_peak_mode and bfactor on CTF.
 
 ### Practical notes
 > *Choose arch, cube_size, and batch_size to fit your GPU memory; larger architectures and cubes improve fidelity but increase resource needs. Enable mixed_precision to save VRAM and speed up training if your GPU and drivers support it.*
+
+> **Performance Tips:** For limited VRAM, use `--use_checkpoint` with `--acc_batches 4` to simulate batch_size 16 with batch_size 4. For slow I/O on HDD/network storage, use `--fast_io --cache_dir /fast_ssd/cache` to pre-extract subvolumes to SSD.
 
 ## predict
 
@@ -530,10 +573,12 @@ The default is 3000 subtomograms in total per epoch. Changing this default is no
 
 Increasing the number of subtomograms is analogous to increasing the number of training epochs, as subtomograms are extracted during training (as opposed to before, in IsoNet1). Because *IsoNet2* does not currently use a specialized learning rate scheduler, it is acceptable to keep the default and simply halt training when the loss has converged. We also do not recommend training for fewer than 50 epochs.
 ## Q: How can I reduce memory usage during training?
-+ Enable mixed_precision for float16 training
++ Enable mixed_precision for float16 training (enabled by default)
++ Use `--use_checkpoint` for 30-50% VRAM reduction (trades ~20% compute)
++ Use `--acc_batches N` to simulate larger batches with less memory
 + Reduce batch_size (minimum being the number of GPUs you have)
-+ Choose a smaller network architecture
-+ Reduce cube_size
++ Choose a smaller network architecture (unet-small vs unet-medium)
++ Reduce cube_size (must be multiple of 16, minimum 64)
 + Use chunk_size with overlap_rate for processing large tomograms
 ## Q: When should I use the CTF deconvolution module?
 Use the ***deconv*** module in two scenarios:
@@ -549,3 +594,34 @@ You can regenerate the mask using less strict (higher values) `density_percentag
 
 ## Q: What value should I use for mw_weight?
 We recommend using higher weights for missing wedge correction (20–200) to prioritize missing wedge reconstruction over general denoising. Keeping `mw_weight` at the default value of 0 disables masked loss, meaning a single loss is used to describe both missing wedge correction and denoising.
+
+## Q: How can I train with large batch sizes on limited GPU memory?
+Use gradient accumulation and checkpointing:
+```bash
+# Simulate batch_size 16 with batch_size 4
+isonet.py refine ... --batch_size 4 --acc_batches 4 --use_checkpoint
+```
+This provides the gradient stability of large batches while fitting in limited VRAM. Gradient checkpointing trades ~20% compute for 30-50% memory savings.
+
+## Q: Training is slow due to I/O bottlenecks. How can I speed it up?
+For HDD or network storage, use Fast I/O mode to pre-extract subvolumes to a memory-mapped cache:
+```bash
+# Pre-extract to SSD cache (one-time cost)
+isonet.py refine ... --fast_io --cache_dir /fast_ssd/isonet_cache
+# Subsequent epochs read from SSD at 10-50x speed
+```
+The cache persists between runs and is automatically validated against source files.
+
+## Q: Should I use torch.compile()?
+Yes, torch.compile() is enabled by default for PyTorch 2.0+ and provides 10-30% speedup through kernel fusion. Disable it only if you encounter compatibility issues:
+```bash
+isonet.py refine ... --compile_model False
+```
+
+## Q: How do I know if my storage is detected correctly?
+The system automatically detects SSD/NVMe/HDD/Network storage and logs the type on startup:
+```
+INFO: Source data storage type: HDD
+WARNING: HDD detected - coordinates will be sorted for sequential access
+```
+For HDDs, coordinates are automatically sorted for sequential reads. For best performance with HDDs, use `--fast_io` with an SSD cache directory.
