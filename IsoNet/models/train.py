@@ -93,14 +93,17 @@ def process_batch(batch, mw_cache=None, ctf_cache=None, wiener_cache=None):
         x1 = batch[0].cuda()
         x2 = batch[1].cuda()
         gt = batch[2].cuda() if batch[2].numel() > 1 else None
-        tomo_indices = batch[3]  # Keep on CPU for indexing
+        tomo_indices = batch[3]  # Batched tensor of tomo indices
         noise_vol = batch[4].cuda() if batch[4].numel() > 1 else None
 
-        if mw_cache is not None:
+        if mw_cache is not None and len(mw_cache) > 0:
+            # Convert tensor indices to Python ints for cache lookup
+            if isinstance(tomo_indices, torch.Tensor):
+                tomo_indices = tomo_indices.cpu().numpy()
             # Gather masks for each sample in batch
-            mw = torch.stack([mw_cache[idx] for idx in tomo_indices])
-            ctf = torch.stack([ctf_cache[idx] for idx in tomo_indices])
-            wiener = torch.stack([wiener_cache[idx] for idx in tomo_indices])
+            mw = torch.stack([mw_cache[int(idx)] for idx in tomo_indices])
+            ctf = torch.stack([ctf_cache[int(idx)] for idx in tomo_indices])
+            wiener = torch.stack([wiener_cache[int(idx)] for idx in tomo_indices])
         else:
             mw, ctf, wiener = None, None, None
 
